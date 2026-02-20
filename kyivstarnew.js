@@ -1,17 +1,16 @@
-// Плагін: Kyivstar TV для Lampa
-// Версія: 0.1 (на основі kyivstar_request.py 2026)
-// Автор: адаптовано Grok для Serhii з Ужгорода
+// Плагін: Київстар ТВ для Lampa
+// Версія: 0.2 (без md5, спрощений device_id)
 
 (function(){
     var manifest = {
         type: 'video',
         name: 'Київстар ТВ',
-        version: '0.1',
+        version: '0.2',
         description: 'Київстар ТВ з логіном (телефон + OTP)',
         component: 'main'
     };
 
-    var device_id = Lampa.Utils.md5(navigator.userAgent + Date.now()); // простий UUID-подібний
+    var device_id = 'lampa-device-' + (Date.now() % 100000000); // простий унікальний ідентифікатор
     var locale = 'uk_UA';
     var session_id = Lampa.Storage.get('kyivstar_session_id', '');
     var user_id = Lampa.Storage.get('kyivstar_user_id', 'anonymous');
@@ -35,9 +34,10 @@
             body: new URLSearchParams(body).toString()
         }).then(r => {
             if (!r.ok) throw new Error('HTTP ' + r.status);
-            return r.json();
+            return r.json().catch(() => r.text());
         }).catch(e => {
-            Lampa.Notice.show('Помилка API: ' + e.message);
+            if (Lampa && Lampa.Notice) Lampa.Notice.show('Помилка API: ' + e.message);
+            console.error(e);
             return null;
         });
     }
@@ -50,9 +50,10 @@
         return fetch(url, { headers: headers })
             .then(r => {
                 if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
+                return r.json().catch(() => r.text());
             }).catch(e => {
-                Lampa.Notice.show('Помилка: ' + e.message);
+                if (Lampa && Lampa.Notice) Lampa.Notice.show('Помилка: ' + e.message);
+                console.error(e);
                 return null;
             });
     }
@@ -65,7 +66,6 @@
             if (!value) return;
             Lampa.Storage.set('kyivstar_phone', value);
 
-            // 1. Анонімний старт для отримання sessionId
             apiPost('authentication/login', {
                 username: '557455cfe4b04ad886a6ae41\\anonymous',
                 password: 'anonymous'
@@ -74,10 +74,9 @@
                     Lampa.Notice.show('Помилка анонімного логіну');
                     return;
                 }
-                session_id = res.jsessionid; // або з cookies, але в fetch cookies автоматично
+                session_id = res.jsessionid;
                 Lampa.Storage.set('kyivstar_session_id', session_id);
 
-                // 2. Надіслати OTP
                 apiPost('v2/otp;jsessionid=' + session_id, {
                     phoneNumber: value,
                     language: 'UK',
@@ -87,7 +86,6 @@
                         title: 'Введіть код з SMS',
                         value: ''
                     }, (otp) => {
-                        // 3. Логін з OTP
                         apiPost('authentication/login/v3;jsessionid=' + session_id, {
                             username: '557455cfe4b04ad886a6ae41\\' + value,
                             otp: otp
@@ -95,11 +93,11 @@
                             if (profile && profile.userId) {
                                 user_id = profile.userId;
                                 Lampa.Storage.set('kyivstar_user_id', user_id);
-
-Lampa.Notice.show('Успішний логін!');
-                                Lampa.Activity.main();
+                                Lampa.Notice.show('Успішний логін!');
+                                
+Lampa.Activity.main();
                             } else {
-                                Lampa.Notice.show('Невірний код');
+                                Lampa.Notice.show('Невірний код або помилка');
                             }
                         });
                     });
@@ -115,7 +113,6 @@ Lampa.Notice.show('Успішний логін!');
             return;
         }
 
-        // Завантажуємо групи каналів (LIVE_CHANNELS)
         apiGet('v1/contentareas/LIVE_CHANNELS', {includeRestricted: true, limit: 100}).then(groups => {
             if (!groups || !groups.length) {
                 object.append([{title: 'Немає каналів', subtitle: 'Спробуйте перелогінитися'}]);
@@ -128,7 +125,6 @@ Lampa.Notice.show('Успішний логін!');
                 img: g.image || '',
                 data: g,
                 action: function(){
-                    // Тут можна завантажити канали з групи
                     apiGet('gallery/contentgroups/' + g.id, {offset:0, limit:500}).then(channels => {
                         var chan_items = (channels || []).map(c => ({
                             title: c.name,
